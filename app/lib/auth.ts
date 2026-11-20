@@ -4,7 +4,7 @@ import { mongodbAdapter } from "@better-auth/mongo-adapter";
 
 const uri =
   process.env.MONGODB_URI ||
-  "mongodb+srv://mashukurmanik_wed_plan:KhcVEz8eyWxJJFH9@cluster0.jcsvfv3.mongodb.net/wedplan";
+  " ";
 
 let client: MongoClient;
 
@@ -23,7 +23,7 @@ if (process.env.NODE_ENV === "development") {
 const db = client.db("wedplan");
 
 export const auth = betterAuth({
-  secret: process.env.BETTER_AUTH_SECRET || "oFCLzAu50nDFkrKEPsfxW6bf6UelaUaV",
+  secret: process.env.BETTER_AUTH_SECRET || " ",
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   emailAndPassword: {
     enabled: true,
