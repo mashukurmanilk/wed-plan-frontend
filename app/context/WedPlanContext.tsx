@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Service, Booking, Transaction, UserRole, ServiceCategory } from '../types';
 import { INITIAL_USERS, INITIAL_SERVICES, INITIAL_BOOKINGS, INITIAL_TRANSACTIONS } from '../data/mockData';
 import { authClient } from '../lib/auth-client';
+import { api } from '../lib/api';
 
 export interface ToastMessage {
   id: string;
@@ -99,7 +100,7 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Better Auth session hook
   const { data: sessionData, isPending: isSessionPending } = authClient.useSession();
 
-  // Initialize and load from localStorage
+  // 1. Initial hydration from localStorage
   useEffect(() => {
     try {
       const storedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
@@ -138,15 +139,62 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const fresh = allUsers.find((u: User) => u._id === parsed._id) || parsed;
         setCurrentUser(fresh);
       } else {
-        // Unauthenticated by default: show Sign In and Register in Navbar
         setCurrentUser(null);
       }
     } catch (e) {
       console.error('Error hydrating localStorage:', e);
       setCurrentUser(null);
-    } finally {
-      setIsLoading(false);
     }
+  }, []);
+
+  // 2. Load live data from Backend API (Express + MongoDB)
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDataFromBackend() {
+      try {
+        const [servicesRes, bookingsRes, usersRes, txnsRes] = await Promise.allSettled([
+          api.getServices(),
+          api.getBookings(),
+          api.getUsers(),
+          api.getTransactions(),
+        ]);
+
+        if (!isMounted) return;
+
+        if (servicesRes.status === 'fulfilled' && Array.isArray(servicesRes.value) && servicesRes.value.length > 0) {
+          setServices(servicesRes.value);
+          localStorage.setItem(STORAGE_KEYS.SERVICES, JSON.stringify(servicesRes.value));
+        }
+
+        if (bookingsRes.status === 'fulfilled' && Array.isArray(bookingsRes.value) && bookingsRes.value.length > 0) {
+          setBookings(bookingsRes.value);
+          localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(bookingsRes.value));
+        }
+
+        if (usersRes.status === 'fulfilled' && Array.isArray(usersRes.value) && usersRes.value.length > 0) {
+          setUsers(usersRes.value);
+          localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(usersRes.value));
+        }
+
+        if (txnsRes.status === 'fulfilled' && Array.isArray(txnsRes.value) && txnsRes.value.length > 0) {
+          setTransactions(txnsRes.value);
+          localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(txnsRes.value));
+        }
+      } catch (err) {
+        console.warn('Backend API connection notice (using offline/local cache):', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadDataFromBackend();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Sync Better Auth Session with WedPlanContext currentUser
@@ -331,6 +379,13 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: new Date().toISOString(),
     };
 
+    // Sync to backend API
+    try {
+      await api.syncUser(newUser);
+    } catch (e) {
+      console.warn('API syncUser notice:', e);
+    }
+
     const updatedUsers = [...users, newUser];
     persistUsers(updatedUsers);
     persistCurrentUser(newUser);
@@ -362,6 +417,13 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...safeData,
       updatedAt: new Date().toISOString(),
     };
+
+    // Sync to backend API
+    try {
+      await api.updateProfile(currentUser._id, safeData);
+    } catch (e) {
+      console.warn('API updateProfile notice:', e);
+    }
 
     const newUsers = users.map((u) => (u._id === currentUser._id ? updatedUser : u));
     persistUsers(newUsers);
@@ -415,32 +477,54 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
-    const newService: Service = {
-      _id: `srv_${Date.now()}`,
-      vendorId: currentUser._id,
-      vendorName: currentUser.name,
-      vendorBusinessName: currentUser.businessName || currentUser.name,
-      vendorAvatar: currentUser.image,
-      vendorRating: 5.0,
-      vendorReviewCount: 1,
-      serviceName: data.serviceName,
-      category: data.category,
-      description: data.description,
-      price: data.price,
-      priceUnit: data.priceUnit || 'Starting Package',
-      location: data.location,
-      images: data.images.length > 0 ? data.images : [
-        'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80'
-      ],
-      features: data.features || ['Premium Customer Consultation', 'Dedicated Service Coordinator'],
-      status: 'pending',
-      isActive: true,
-      featured: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    let newService: Service;
 
-    const updated = [newService, ...services];
+    try {
+      newService = await api.createService({
+        serviceName: data.serviceName,
+        category: data.category,
+        description: data.description,
+        price: data.price,
+        priceUnit: data.priceUnit || 'Starting Package',
+        location: data.location,
+        images: data.images.length > 0 ? data.images : [
+          'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80'
+        ],
+        features: data.features || ['Premium Customer Consultation', 'Dedicated Service Coordinator'],
+        vendorId: currentUser._id,
+        vendorName: currentUser.name,
+        vendorBusinessName: currentUser.businessName || currentUser.name,
+        vendorAvatar: currentUser.image,
+      });
+    } catch (apiErr) {
+      console.warn('API createService failed or offline, falling back locally:', apiErr);
+      newService = {
+        _id: `srv_${Date.now()}`,
+        vendorId: currentUser._id,
+        vendorName: currentUser.name,
+        vendorBusinessName: currentUser.businessName || currentUser.name,
+        vendorAvatar: currentUser.image,
+        vendorRating: 5.0,
+        vendorReviewCount: 1,
+        serviceName: data.serviceName,
+        category: data.category,
+        description: data.description,
+        price: data.price,
+        priceUnit: data.priceUnit || 'Starting Package',
+        location: data.location,
+        images: data.images.length > 0 ? data.images : [
+          'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80'
+        ],
+        features: data.features || ['Premium Customer Consultation', 'Dedicated Service Coordinator'],
+        status: 'pending',
+        isActive: true,
+        featured: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const updated = [newService, ...services.filter((s) => s._id !== newService._id)];
     persistServices(updated);
     showToast('Service submitted successfully! It is now pending admin approval.', 'success');
     return { success: true, service: newService };
@@ -455,6 +539,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (service.vendorId !== currentUser._id && currentUser.role !== 'admin') {
       showToast('You do not have permission to edit this service.', 'error');
       return { success: false, error: 'Permission denied' };
+    }
+
+    try {
+      await api.updateService(id, data);
+    } catch (e) {
+      console.warn('API updateService notice:', e);
     }
 
     const updated = services.map((s) =>
@@ -480,6 +570,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (service.vendorId !== currentUser._id && currentUser.role !== 'admin') {
       showToast('You do not have permission to delete this service.', 'error');
       return { success: false, error: 'Permission denied' };
+    }
+
+    try {
+      await api.deleteService(id);
+    } catch (e) {
+      console.warn('API deleteService notice:', e);
     }
 
     const filtered = services.filter((s) => s._id !== id);
@@ -508,6 +604,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
     }
 
+    try {
+      await api.toggleServiceActive(id);
+    } catch (e) {
+      console.warn('API toggleServiceActive notice:', e);
+    }
+
     const updated = services.map((s) =>
       s._id === id ? { ...s, isActive: !s.isActive, updatedAt: new Date().toISOString() } : s
     );
@@ -519,6 +621,13 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Admin moderation
   const adminApproveService = async (id: string) => {
     if (currentUser?.role !== 'admin') return;
+
+    try {
+      await api.updateServiceStatus(id, 'approved');
+    } catch (e) {
+      console.warn('API adminApproveService notice:', e);
+    }
+
     const updated = services.map((s) =>
       s._id === id ? { ...s, status: 'approved' as const, updatedAt: new Date().toISOString() } : s
     );
@@ -528,6 +637,13 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const adminRejectService = async (id: string) => {
     if (currentUser?.role !== 'admin') return;
+
+    try {
+      await api.updateServiceStatus(id, 'rejected');
+    } catch (e) {
+      console.warn('API adminRejectService notice:', e);
+    }
+
     const updated = services.map((s) =>
       s._id === id ? { ...s, status: 'rejected' as const, updatedAt: new Date().toISOString() } : s
     );
@@ -537,6 +653,13 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const adminDeleteService = async (id: string) => {
     if (currentUser?.role !== 'admin') return;
+
+    try {
+      await api.deleteService(id);
+    } catch (e) {
+      console.warn('API adminDeleteService notice:', e);
+    }
+
     const filtered = services.filter((s) => s._id !== id);
     persistServices(filtered);
     showToast('Inappropriate service permanently deleted by Admin.', 'info');
@@ -546,6 +669,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (currentUser?.role !== 'admin') return;
     const user = users.find((u) => u._id === userId);
     if (!user) return;
+
+    try {
+      await api.toggleUserBlock(userId);
+    } catch (e) {
+      console.warn('API toggleUserBlock notice:', e);
+    }
 
     const newBlocked = !user.isBlocked;
     const updated = users.map((u) =>
@@ -605,30 +734,47 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Duplicate booking on selected date.' };
     }
 
-    const newBooking: Booking = {
-      _id: `bkg_${Date.now()}`,
-      serviceId: service._id,
-      serviceName: service.serviceName,
-      serviceImage: service.images[0] || 'https://images.unsplash.com/photo-1519741497674-611481863552',
-      serviceCategory: service.category,
-      vendorId: service.vendorId,
-      vendorName: service.vendorName,
-      vendorBusinessName: service.vendorBusinessName,
-      customerId: currentUser._id,
-      customerName: currentUser.name,
-      customerEmail: currentUser.email,
-      customerPhone: currentUser.phone || '',
-      eventDate: data.eventDate,
-      eventLocation: data.eventLocation,
-      estimatedPrice: service.price,
-      guestCount: data.guestCount || 100,
-      message: data.message || 'We look forward to coordinating with you!',
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    let newBooking: Booking;
 
-    const updatedBookings = [newBooking, ...bookings];
+    try {
+      newBooking = await api.createBooking({
+        serviceId: service._id,
+        customerId: currentUser._id,
+        customerName: currentUser.name,
+        customerEmail: currentUser.email,
+        customerPhone: currentUser.phone || '',
+        eventDate: data.eventDate,
+        eventLocation: data.eventLocation,
+        guestCount: data.guestCount || 100,
+        message: data.message || '',
+      });
+    } catch (apiErr) {
+      console.warn('API createBooking fallback:', apiErr);
+      newBooking = {
+        _id: `bkg_${Date.now()}`,
+        serviceId: service._id,
+        serviceName: service.serviceName,
+        serviceImage: service.images[0] || 'https://images.unsplash.com/photo-1519741497674-611481863552',
+        serviceCategory: service.category,
+        vendorId: service.vendorId,
+        vendorName: service.vendorName,
+        vendorBusinessName: service.vendorBusinessName,
+        customerId: currentUser._id,
+        customerName: currentUser.name,
+        customerEmail: currentUser.email,
+        customerPhone: currentUser.phone || '',
+        eventDate: data.eventDate,
+        eventLocation: data.eventLocation,
+        estimatedPrice: service.price,
+        guestCount: data.guestCount || 100,
+        message: data.message || 'We look forward to coordinating with you!',
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    const updatedBookings = [newBooking, ...bookings.filter((b) => b._id !== newBooking._id)];
     persistBookings(updatedBookings);
     showToast('Booking request sent successfully to vendor!', 'success');
     return { success: true, booking: newBooking };
@@ -648,6 +794,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     if (booking.status !== 'pending') {
       showToast(`Cannot cancel a booking that is already ${booking.status}.`, 'error');
       return { success: false, error: 'Only pending requests can be cancelled.' };
+    }
+
+    try {
+      await api.cancelBooking(bookingId);
+    } catch (e) {
+      console.warn('API cancelBooking notice:', e);
     }
 
     const updated = bookings.map((b) =>
@@ -679,6 +831,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Booking decision already finalized.' };
     }
 
+    try {
+      await api.updateBookingStatus(bookingId, newStatus);
+    } catch (e) {
+      console.warn('API updateBookingStatus notice:', e);
+    }
+
     const updated = bookings.map((b) =>
       b._id === bookingId
         ? { ...b, status: newStatus, updatedAt: new Date().toISOString() }
@@ -693,6 +851,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const upgradeToPremium = async (vendorId: string, stripeSessionId = `cs_test_${Date.now()}`) => {
     const vendor = users.find((u) => u._id === vendorId);
     if (!vendor) return { success: false, error: 'Vendor not found' };
+
+    try {
+      await api.upgradeToPremium(vendorId, stripeSessionId);
+    } catch (e) {
+      console.warn('API upgradeToPremium notice:', e);
+    }
 
     const transaction: Transaction = {
       _id: `txn_${Date.now()}`,
@@ -709,7 +873,7 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: new Date().toISOString(),
     };
 
-    const newTransactions = [transaction, ...transactions];
+    const newTransactions = [transaction, ...transactions.filter((t) => t.stripeSessionId !== stripeSessionId)];
     persistTransactions(newTransactions);
 
     const updatedUsers = users.map((u) =>
