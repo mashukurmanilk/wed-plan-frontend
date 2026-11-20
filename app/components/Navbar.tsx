@@ -160,7 +160,7 @@ export const Navbar: React.FC = () => {
                           className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium text-stone-700 hover:bg-[#F3ECE2] hover:text-[#944F38] transition-colors"
                         >
                           <LayoutDashboard className="w-4 h-4" />
-                          Dashboard
+                          User Dashboard
                         </Link>
 
                         <Link
@@ -175,9 +175,9 @@ export const Navbar: React.FC = () => {
 
                       <div className="border-t border-stone-100 p-1 mt-1">
                         <button
-                          onClick={() => {
+                          onClick={async () => {
                             setProfileDropdownOpen(false);
-                            logout();
+                            await logout();
                             router.push('/');
                           }}
                           className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium text-rose-600 hover:bg-rose-50 transition-colors"
@@ -203,7 +203,7 @@ export const Navbar: React.FC = () => {
                   href="/auth/signup"
                   className="px-5 py-2.5 text-sm font-semibold rounded-full bg-[#B85D43] text-white hover:bg-[#A45741] transition-all shadow-md shadow-[#B85D43]/20"
                 >
-                  Join WedPlan
+                  Register
                 </Link>
               </div>
             )}
@@ -259,13 +259,13 @@ export const Navbar: React.FC = () => {
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-[#B85D43] text-white font-semibold text-sm shadow"
                 >
-                  <LayoutDashboard className="w-4 h-4" /> Go to Dashboard
+                  <LayoutDashboard className="w-4 h-4" /> Go to User Dashboard
                 </Link>
 
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     setMobileMenuOpen(false);
-                    logout();
+                    await logout();
                     router.push('/');
                   }}
                   className="w-full py-2.5 rounded-xl border border-rose-200 text-rose-600 font-medium text-sm hover:bg-rose-50"
@@ -287,7 +287,7 @@ export const Navbar: React.FC = () => {
                   onClick={() => setMobileMenuOpen(false)}
                   className="w-full text-center py-2.5 rounded-xl bg-[#B85D43] text-white font-semibold text-sm shadow"
                 >
-                  Join WedPlan
+                  Register
                 </Link>
               </div>
             )}

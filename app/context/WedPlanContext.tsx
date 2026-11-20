@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Service, Booking, Transaction, UserRole, ServiceCategory } from '../types';
 import { INITIAL_USERS, INITIAL_SERVICES, INITIAL_BOOKINGS, INITIAL_TRANSACTIONS } from '../data/mockData';
+import { authClient } from '../lib/auth-client';
 
 export interface ToastMessage {
   id: string;
@@ -30,7 +31,7 @@ interface WedPlanContextType {
     businessName?: string;
     image?: string;
   }) => Promise<{ success: boolean; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<{ success: boolean; error?: string }>;
 
   // Services
@@ -95,6 +96,9 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // Better Auth session hook
+  const { data: sessionData, isPending: isSessionPending } = authClient.useSession();
+
   // Initialize and load from localStorage
   useEffect(() => {
     try {
@@ -130,23 +134,60 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       if (storedUser) {
         const parsed = JSON.parse(storedUser);
-        // Find freshest version from users
         const allUsers = storedUsers ? JSON.parse(storedUsers) : INITIAL_USERS;
         const fresh = allUsers.find((u: User) => u._id === parsed._id) || parsed;
         setCurrentUser(fresh);
       } else {
-        // Default to Customer Demo for seamless instant browsing
-        const defaultUser = INITIAL_USERS[0];
-        setCurrentUser(defaultUser);
-        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(defaultUser));
+        // Unauthenticated by default: show Sign In and Register in Navbar
+        setCurrentUser(null);
       }
     } catch (e) {
       console.error('Error hydrating localStorage:', e);
-      setCurrentUser(INITIAL_USERS[0]);
+      setCurrentUser(null);
     } finally {
       setIsLoading(false);
     }
   }, []);
+
+  // Sync Better Auth Session with WedPlanContext currentUser
+  useEffect(() => {
+    if (sessionData?.user) {
+      const existing = users.find(
+        (u) => u.email.toLowerCase() === sessionData.user.email.toLowerCase()
+      );
+      const role = ((sessionData.user as Record<string, unknown>).role ||
+        existing?.role ||
+        'customer') as UserRole;
+
+      const betterUser: User = {
+        _id: sessionData.user.id || existing?._id || `usr_${Date.now()}`,
+        name: sessionData.user.name || existing?.name || 'Wedding Planner',
+        email: sessionData.user.email,
+        image: sessionData.user.image || existing?.image,
+        role,
+        isBlocked:
+          ((sessionData.user as Record<string, unknown>).isBlocked as boolean) ??
+          existing?.isBlocked ??
+          false,
+        businessName:
+          ((sessionData.user as Record<string, unknown>).businessName as string) ||
+          existing?.businessName,
+        subscriptionPlan: (((sessionData.user as Record<string, unknown>).subscriptionPlan as string) ||
+          existing?.subscriptionPlan ||
+          'free') as 'free' | 'premium',
+        phone:
+          ((sessionData.user as Record<string, unknown>).phone as string) || existing?.phone,
+        bio: ((sessionData.user as Record<string, unknown>).bio as string) || existing?.bio,
+        createdAt: existing?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      setCurrentUser(betterUser);
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(betterUser));
+    } else if (!isSessionPending && !localStorage.getItem(STORAGE_KEYS.USER)) {
+      setCurrentUser(null);
+    }
+  }, [sessionData, isSessionPending, users]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Date.now().toString() + Math.random().toString().slice(2, 6);
@@ -191,6 +232,17 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Auth Operations
   const login = async (email: string, password?: string) => {
+    try {
+      if (password) {
+        await authClient.signIn.email({
+          email,
+          password,
+        });
+      }
+    } catch (err) {
+      console.warn('Better-auth signin notice:', err);
+    }
+
     const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
     if (!user) {
       showToast('No account found with this email.', 'error');
@@ -223,7 +275,7 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     if (targetUser) {
       persistCurrentUser(targetUser);
-      showToast(`Switched account to ${targetUser.name} (${targetUser.role.toUpperCase()})`, 'info');
+      showToast(`Signed in as ${targetUser.name} (${targetUser.role.toUpperCase()})`, 'info');
     }
   };
 
@@ -253,6 +305,17 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Email already registered.' };
     }
 
+    try {
+      await authClient.signUp.email({
+        email: data.email,
+        password: data.password || 'WedPlan123!',
+        name: data.name,
+        image: data.image,
+      });
+    } catch (err) {
+      console.warn('Better-auth signup notice:', err);
+    }
+
     const newUser: User = {
       _id: `usr_${Date.now()}`,
       name: data.name,
@@ -275,7 +338,12 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await authClient.signOut();
+    } catch (e) {
+      console.warn('Better-auth signOut notice:', e);
+    }
     persistCurrentUser(null);
     showToast('Signed out successfully.', 'info');
   };
@@ -283,7 +351,6 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const updateProfile = async (data: Partial<User>) => {
     if (!currentUser) return { success: false, error: 'Not authenticated' };
 
-    // Prevent security violation: cannot self-update role or subscriptionPlan
     const safeData = { ...data };
     delete safeData.role;
     delete safeData.subscriptionPlan;
@@ -331,7 +398,6 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Account blocked' };
     }
 
-    // Free vendor limit check: Max 3 active services
     if (currentUser.subscriptionPlan === 'free') {
       const activeCount = services.filter(
         (s) => s.vendorId === currentUser._id && s.isActive
@@ -367,7 +433,7 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
         'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=1200&q=80'
       ],
       features: data.features || ['Premium Customer Consultation', 'Dedicated Service Coordinator'],
-      status: 'pending', // Default status: Pending (until approved by admin)
+      status: 'pending',
       isActive: true,
       featured: false,
       createdAt: new Date().toISOString(),
@@ -386,7 +452,6 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const service = services.find((s) => s._id === id);
     if (!service) return { success: false, error: 'Service not found' };
 
-    // Ownership check
     if (service.vendorId !== currentUser._id && currentUser.role !== 'admin') {
       showToast('You do not have permission to edit this service.', 'error');
       return { success: false, error: 'Permission denied' };
@@ -433,7 +498,6 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Permission denied' };
     }
 
-    // If activating, verify 3 service limit for free plan
     if (!service.isActive && currentUser.subscriptionPlan === 'free') {
       const activeCount = services.filter(
         (s) => s.vendorId === currentUser._id && s.isActive
@@ -522,13 +586,11 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return { success: false, error: 'Service not found' };
     }
 
-    // Rule: Cannot book own service
     if (service.vendorId === currentUser._id) {
       showToast('You cannot book your own service listing.', 'error');
       return { success: false, error: 'Vendors cannot book their own services.' };
     }
 
-    // Rule: Prevent duplicate active booking request for same service and event date
     const duplicate = bookings.find(
       (b) =>
         b.serviceId === data.serviceId &&
@@ -650,7 +712,6 @@ export const WedPlanProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newTransactions = [transaction, ...transactions];
     persistTransactions(newTransactions);
 
-    // Update vendor subscription plan
     const updatedUsers = users.map((u) =>
       u._id === vendorId
         ? {

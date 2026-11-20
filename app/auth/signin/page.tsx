@@ -11,7 +11,7 @@ function SignInContent() {
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get('redirect');
 
-  const { login, loginAsDemo } = useWedPlan();
+  const { login, loginAsDemo, users } = useWedPlan();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -29,7 +29,14 @@ function SignInContent() {
       if (redirectUrl) {
         router.push(redirectUrl);
       } else {
-        router.push('/');
+        const loggedUser = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+        if (loggedUser?.role === 'admin') {
+          router.push('/dashboard/admin');
+        } else if (loggedUser?.role === 'vendor') {
+          router.push('/dashboard/vendor');
+        } else {
+          router.push('/dashboard/customer');
+        }
       }
     } else {
       setError(result.error || 'Failed to sign in. Please verify your email.');
