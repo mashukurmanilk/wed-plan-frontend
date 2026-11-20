@@ -1,4 +1,4 @@
-# WedPlan — The Luxury Wedding Planning Platform (Inspired by Loverly)
+# WedPlan — The Luxury Wedding Planning Platform
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.4.6-black?logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.3.0-blue?logo=react)](https://react.dev/)
@@ -77,23 +77,3 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
-
----
-
-## 🔑 Demo Accounts for Instant Evaluation
-
-WedPlan includes a **1-Click Demo Switcher** directly in the top header and on the Sign In page (`/auth/signin`):
-
-| Role | Account Name | Email | Password | Key Testing Capabilities |
-| :--- | :--- | :--- | :--- | :--- |
-| **Admin** | Sarah Jenkins | `admin@wedplan.com` | `Admin123!` | Moderate pending services, block/unblock users, view Stripe transactions |
-| **Vendor (Free)** | Aurora Rossi | `aurora@auroraphotography.com` | `Vendor123!` | Test 3-service limit, accept/reject booking requests, upgrade to Premium |
-| **Vendor (Premium)** | Julian Montgomery | `julian@starlightestates.com` | `Vendor123!` | Unlimited service publishing, verified Pro badge |
-| **Customer** | Emily & James Sterling | `emily@wedplan.com` | `Customer123!` | Request bookings, cancel pending bookings, checklist & budget tools |
-
----
-
-## 📁 Repository Links
-
-* **Frontend Repository:** [https://github.com/mashukurmanilk/wed-plan-frontend](https://github.com/mashukurmanilk/wed-plan-frontend)
-* **Backend Repository:** [https://github.com/mashukurmanilk/wed-plan-backend](https://github.com/mashukurmanilk/wed-plan-backend)
